@@ -125,10 +125,10 @@ class cgm(object):
         input_mean = keras.Input(shape=(self.dim_out, self.dim_in_mean), name = "input_mean")
         input_sd = keras.Input(shape=(self.dim_out, self.dim_in_std), name = "input_sd")
         input_all = keras.Input(shape=(self.dim_out, self.dim_in_features), name = "input_all")
-        bs = K.shape(input_mean)[0]
+        bs = tf.shape(input_mean)[0]
         
-        #####
-        x_mean = layers.LocallyConnected1D(filters=1, 
+        ##### mean model ####
+        y_mean = layers.LocallyConnected1D(filters=1, 
                                        kernel_size=1, 
                                        strides=1,
                                        padding='valid',
@@ -136,46 +136,55 @@ class cgm(object):
                                        use_bias=True,
                                        activation='linear')(input_mean) # (, dim_out, 1)
         
-        x_mean_all = layers.Lambda(lambda arg: K.repeat_elements(arg, self._n_samples, axis=-1))(x_mean) # (, dim_out, n_samples)
+        y_mean_ = layers.Lambda(lambda arg: K.repeat_elements(arg, self._n_samples, axis=-1))(y_mean) # (, dim_out, n_samples)
         
-        #####
-        z_delta = layers.LocallyConnected1D(filters=1, 
+        ##### conditional noise model ####
+        # why is this only locally connected but then we use a dense layer, we could also directly apply the dense here I think?
+        log_sd_z = layers.LocallyConnected1D(filters=1, 
                                        kernel_size=1, 
                                        strides=1,
                                        padding='valid',
                                        data_format='channels_last',
                                        use_bias=True,
-                                       activation='linear')(input_sd) # (, dim_out, 1)
+                                       activation='linear')(input_sd) # (, dim_out, dim_in_sd) --> (, dim_out, 1)
         
-        z_delta_flat = layers.Flatten()(z_delta)
-        z_delta_final = layers.Dense(self.dim_latent, activation = 'exponential')(z_delta_flat) # spread of latent variables 
-        z_delta_reshape = layers.Lambda(lambda arg: K.reshape(arg, (bs, self.dim_latent, 1)))(z_delta_final) # (, dim_latent, 1)
-        
+        log_sd_z = layers.Flatten()(log_sd_z) # (, dim_out)
+        sd_z = layers.Dense(self.dim_latent, activation = 'exponential')(log_sd_z) # spread of latent variables 
+        #sd_z = layers.Lambda(lambda arg: K.reshape(arg, (bs, self.dim_latent, 1)))(sd_z) # (, dim_latent, 1)
+        sd_z = layers.Reshape((self.dim_latent, 1))(sd_z) # better use reshape layer here
+
         if self.latent_dist == "uniform":
-            z = layers.Lambda(lambda args: K.random_uniform(shape=(args[0], args[1], args[2]), 
+            epsilon = layers.Lambda(lambda args: K.random_uniform(shape=(args[0], args[1], args[2]), 
                                                      minval=self.latent_dist_params[0], 
                                                      maxval=self.latent_dist_params[1]))([bs, self.dim_latent, self._n_samples])
         elif self.latent_dist == "normal":
-            z = layers.Lambda(lambda args: K.random_normal(shape=(args[0], args[1], args[2]), 
+            epsilon = layers.Lambda(lambda args: K.random_normal(shape=(args[0], args[1], args[2]), 
                                                     mean=self.latent_dist_params[0], 
                                                     stddev=self.latent_dist_params[1]))([bs, self.dim_latent, self._n_samples])
        
-        z_adjust_spread = layers.Multiply()([z_delta_reshape, z]) # (, dim_latent, n_samples)
+        z = layers.Multiply()([sd_z, epsilon]) # (, dim_latent, n_samples)
         
         #####
-        W = layers.Flatten()(input_all)
-        z_n = layers.Flatten()(z_adjust_spread)
-        W = layers.Concatenate(axis=1)([W, z_n])
-        
+        #W = layers.Flatten()(input_all) # (, dim_out, dim_features) --> (, dim_out*dim_features)
+        #z_n = layers.Flatten()(z) # (, dim_latent, n_samples) --> # (, dim_latent*n_samples)
+        #W = layers.Concatenate(axis=1)([W, z_n]) # --> (, dim_out*dim_features+dim_latent*n_samples)
+
         # Dense NN: hidden layers 2 * 25
+        #W = layers.Dense(25, use_bias=True, activation = 'elu')(W)
+        #W = layers.Dense(25, use_bias=True, activation = 'elu')(W)
+        #W = layers.Dense(self.dim_out*self._n_samples, use_bias=True, activation = 'linear')(W) # (, dim_out*n_samples)
+        #y_noise = layers.Reshape((self.dim_out, self._n_samples))(W) # (, dim_out, n_samples)
+
+        input_all_ = layers.Reshape((self.dim_out*self.dim_in_features,1))(input_all)
+        input_all_ = layers.Lambda(lambda arg: K.repeat_elements(arg, self._n_samples, axis=-1))(input_all_) # (, dim_out*dim_in_festures, n_samples)
+        W = layers.Concatenate(axis=1)([input_all_, z]) # -->  (, dim_out*dim_in_festures+dim_latent, n_samples)
+        W = layers.Permute((2,1))(W) # Dense is applied to last dimension, i.e. we need features in last dim
         W = layers.Dense(25, use_bias=True, activation = 'elu')(W)
         W = layers.Dense(25, use_bias=True, activation = 'elu')(W)
+        y_noise = layers.Dense(self.dim_out, use_bias=True, activation = 'linear')(W) # (, dim_out, n_samples)
+        y_noise = layers.Permute((2,1))(y_noise) # --> back to (, dim_out, n_samples)
         
-        W = layers.Dense(self.dim_out*self._n_samples, use_bias=True, activation = 'linear')(W) # (, dim_out*n_samples)
-        z_samples = layers.Reshape((self.dim_out, self._n_samples))(W) # (, dim_out, n_samples)
-        
-        y = layers.Add()([x_mean_all, z_samples])
-        
+        y = layers.Add()([y_mean_, y_noise])
 
         return Model(inputs=[input_mean, input_sd, input_all], outputs=y)
 
