@@ -20,10 +20,10 @@ mdl=cgm(dim_out = D,
         dim_latent = L, 
         n_samples_train = S,
         latent_dist="normal",
-        model_type="t2m")
+        model_type="ws")
 
 mdl.model.summary()
 
         
 # fit model
-#mdl.fit(x = [mus, sd, x], y = y)
+mdl.fit(x = [mus, sd, x], y = y)
