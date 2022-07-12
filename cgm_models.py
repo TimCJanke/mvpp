@@ -17,15 +17,15 @@ sns.set()
 
 
 # define energy score
-def energy_score(y_true, S):
+def energy_score(y_true, y_pred):
     """
-    Computes energy score:
+    Computes energy score efficiently.
 
     Parameters
     ----------
     y_true : tf tensor of shape (BATCH_SIZE, D, 1)
         True values.
-    S : tf tensor of shape (BATCH_SIZE, D, N_SAMPLES)
+    y_pred : tf tensor of shape (BATCH_SIZE, D, N_SAMPLES)
         Predictive samples.
 
     Returns
@@ -34,25 +34,25 @@ def energy_score(y_true, S):
         Scores.
 
     """
-    beta=1
-    n_samples = S.shape[-1]
-    def expected_dist(diff, beta):
-        return K.sum(K.pow(K.sqrt(K.sum(K.square(diff), axis=-2)+K.epsilon()), beta),axis=-1)
-    es_1 = expected_dist(y_true - S, beta)
-    es_2 = 0
-    for i in range(n_samples):
-        es_2 = es_2 + expected_dist(K.expand_dims(S[:,:,i]) - S, beta)
-        
-    n_samples = tf.cast(n_samples, tf.float32)
-    es = es_1/n_samples - es_2/(2*n_samples**2)
-    es = tf.cast(es, tf.float32)
-    return es
+    n_samples_model = tf.cast(tf.shape(y_pred)[2], dtype=tf.float32)
+    
+    es_12 = tf.reduce_sum(tf.sqrt(tf.clip_by_value(tf.matmul(y_true, y_true, transpose_a=True, transpose_b=False) + tf.square(tf.linalg.norm(y_pred, axis=1, keepdims=True)) - 2*tf.matmul(y_true, y_pred, transpose_a=True, transpose_b=False), K.epsilon(), 1e10)), axis=(1,2))    
+    G = tf.linalg.matmul(y_pred, y_pred, transpose_a=True, transpose_b=False)
+    d = tf.expand_dims(tf.linalg.diag_part(G, k=0), axis=1)
+    es_22 = tf.reduce_sum(tf.sqrt(tf.clip_by_value(d + tf.transpose(d, perm=(0,2,1)) - 2*G, K.epsilon(), 1e10)), axis=(1,2))
+
+    loss = es_12/(n_samples_model) -  es_22/(2*n_samples_model*(n_samples_model-1))
+    
+    return loss
 
 
-# subclass tensorflow.keras.losses.Loss
+# subclass Keras loss
 class EnergyScore(Loss):
-    def call(self, y_true, S):
-        return energy_score(y_true, S)
+    def __init__(self, name="EnergyScore", **kwargs):
+        super().__init__(name=name, **kwargs)
+
+    def call(self, y_data, y_model):
+        return energy_score(y_data, y_model)
 
 
 class cgm(object):
