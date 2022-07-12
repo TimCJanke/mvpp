@@ -226,11 +226,17 @@ def all_scores_mv_sample(y_true, y_pred,
         True values.
     y_pred : array, shape (n_examples, n_dim, n_samples)
         Samples from predictive distribution. 
+    return_single_scores: boolean.
+         If the complete sereies or only the mean score is returned. The default is false.
+    taus: list.
+        Which quantiles to compute for Pinball Score. Default is [0.1,0.9]
     CALIBRATION : TYPE, optional
         DESCRIPTION. The default is True.    
     MSE : TYPE, optional
         DESCRIPTION. The default is True.
     MAE : TYPE, optional
+        DESCRIPTION. The default is True.
+    PB : TYPE, optional
         DESCRIPTION. The default is True.
     CRPS : TYPE, optional
         DESCRIPTION. The default is True.
@@ -241,11 +247,11 @@ def all_scores_mv_sample(y_true, y_pred,
     VS1 : TYPE, optional
         DESCRIPTION. The default is True.
     CES : TYPE, optional
-        DESCRIPTION. The default is True.
+        Copula Energy Score. The default is False.
     CVS05 : TYPE, optional
-        DESCRIPTION. The default is True.
+        Copula VS0.5. The default is False.
     CVS1 : TYPE, optional
-        DESCRIPTION. The default is True.
+        Copula VS1.0. The default is False.
 
     Returns
     -------
